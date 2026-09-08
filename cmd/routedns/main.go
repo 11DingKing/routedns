@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -563,6 +564,50 @@ func run(opt options, args []string) error {
 	return nil
 }
 
+// parseByteSize parses a size such as "100MB" or "1GiB". A bare number is
+// bytes and an empty string means 0 (unlimited). Units are binary
+// (1K = 1024 bytes) and case-insensitive: b, k/kb/kib, m/mb/mib, g/gb/gib,
+// t/tb/tib.
+func parseByteSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	numPart, unit := s[:i], strings.ToLower(strings.TrimSpace(s[i:]))
+	if numPart == "" {
+		return 0, fmt.Errorf("size %q must start with a number", s)
+	}
+	v, err := strconv.ParseInt(numPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("size %q: %w", s, err)
+	}
+	if v < 0 {
+		return 0, fmt.Errorf("size %q must not be negative", s)
+	}
+	mult := int64(1)
+	switch unit {
+	case "", "b":
+	case "k", "kb", "kib":
+		mult = 1 << 10
+	case "m", "mb", "mib":
+		mult = 1 << 20
+	case "g", "gb", "gib":
+		mult = 1 << 30
+	case "t", "tb", "tib":
+		mult = 1 << 40
+	default:
+		return 0, fmt.Errorf("size %q uses unknown unit %q", s, unit)
+	}
+	if v > math.MaxInt64/mult {
+		return 0, fmt.Errorf("size %q is too large", s)
+	}
+	return v * mult, nil
+}
+
 // Instantiate a group object based on configuration and add to the map of resolvers by ID.
 func instantiateGroup(id string, g group, resolvers map[string]rdns.Resolver) error {
 	var gr []rdns.Resolver
@@ -1039,14 +1084,24 @@ func instantiateGroup(id string, g group, resolvers map[string]rdns.Resolver) er
 		if len(gr) != 1 {
 			return fmt.Errorf("type query-log only supports one resolver in '%s'", id)
 		}
+		maxSize, err := parseByteSize(g.RotationSize)
+		if err != nil {
+			return fmt.Errorf("invalid rotation-size in '%s': %w", id, err)
+		}
+		if maxSize > 0 && g.OutputFile == "" {
+			return fmt.Errorf("rotation-size requires output-file to be set in '%s'", id)
+		}
 		opt := rdns.QueryLogResolverOptions{
 			OutputFile:   g.OutputFile,
 			OutputFormat: rdns.LogFormat(g.OutputFormat),
+			MaxSize:      maxSize,
 		}
-		resolvers[id], err = rdns.NewQueryLogResolver(id, gr[0], opt)
+		ql, err := rdns.NewQueryLogResolver(id, gr[0], opt)
 		if err != nil {
 			return fmt.Errorf("failed to initialize 'query-log': %w", err)
 		}
+		resolvers[id] = ql
+		onClose = append(onClose, func() { _ = ql.Close() })
 	case "lua":
 		// Determine script content: inline or from file
 		script := g.LuaScript

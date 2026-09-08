@@ -14,6 +14,11 @@ resolvers = ["cloudflare-dot"]
 # see doc/overview.md#writable-paths.
 # output-file = "/var/log/routedns/query.log"
 output-format = "text" # or "json"
+# Rotate the log file once it grows past this size (requires output-file). The
+# active file is renamed to query.log.1, query.log.2, ... and numbering continues
+# across restarts. Bare numbers are bytes; k/m/g/t (optionally with b/ib) are
+# binary units. Unset means append without rotation.
+# rotation-size = "100MB"
 
 [resolvers.cloudflare-dot]
 address = "1.1.1.1:853"

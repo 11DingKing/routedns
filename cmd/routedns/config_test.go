@@ -1,10 +1,12 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	rdns "github.com/folbricht/routedns"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,6 +78,75 @@ resolver = "cached"
 	_, err := loadConfig(name)
 	require.NoError(t, err)
 	require.Empty(t, log.String())
+}
+
+func TestParseByteSize(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"", 0, false},
+		{"  ", 0, false},
+		{"1024", 1024, false},
+		{"1024b", 1024, false},
+		{"1k", 1024, false},
+		{"1KB", 1024, false},
+		{"1KiB", 1024, false},
+		{"2mb", 2 * 1024 * 1024, false},
+		{"1MiB", 1024 * 1024, false},
+		{"1g", 1 << 30, false},
+		{"1GB", 1 << 30, false},
+		{"1tib", 1 << 40, false},
+		{" 5 MB ", 5 * 1024 * 1024, false},
+		{"abc", 0, true},
+		{"-1", 0, true},
+		{"1.5mb", 0, true},
+		{"999999999999999999999tb", 0, true},
+	}
+	for _, tt := range tests {
+		got, err := parseByteSize(tt.in)
+		if tt.wantErr {
+			require.Errorf(t, err, "input %q", tt.in)
+			continue
+		}
+		require.NoErrorf(t, err, "input %q", tt.in)
+		require.Equalf(t, tt.want, got, "input %q", tt.in)
+	}
+}
+
+// rotation-size requires an output file; an invalid size string is rejected at
+// group instantiation.
+func TestQueryLogRotationSizeValidation(t *testing.T) {
+	upstream := &countingResolver{name: "upstream"}
+	resolvers := map[string]rdns.Resolver{"upstream": upstream}
+
+	err := instantiateGroup("ql", group{
+		Type:         "query-log",
+		Resolvers:    []string{"upstream"},
+		RotationSize: "100MB",
+	}, resolvers)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rotation-size requires output-file")
+
+	err = instantiateGroup("ql", group{
+		Type:         "query-log",
+		Resolvers:    []string{"upstream"},
+		OutputFile:   filepath.Join(t.TempDir(), "query.log"),
+		RotationSize: "not-a-size",
+	}, resolvers)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid rotation-size")
+
+	// A valid combination builds and closes cleanly.
+	err = instantiateGroup("ql2", group{
+		Type:         "query-log",
+		Resolvers:    []string{"upstream"},
+		OutputFile:   filepath.Join(t.TempDir(), "query.log"),
+		RotationSize: "100MB",
+	}, resolvers)
+	require.NoError(t, err)
+	require.NoError(t, resolvers["ql2"].(io.Closer).Close())
 }
 
 // Config split over multiple files is concatenated before decoding, so

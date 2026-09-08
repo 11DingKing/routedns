@@ -209,6 +209,7 @@ type group struct {
 	// Query logging options
 	OutputFile   string `toml:"output-file"`   // Log filename or blank for STDOUT
 	OutputFormat string `toml:"output-format"` // "text" or "json"
+	RotationSize string `toml:"rotation-size"` // Rotate the log file past this size, e.g. "100MB"; blank disables rotation. Requires output-file.
 
 	// Prefetch options
 	PrefetchWindow    time.Duration `toml:"prefetch-window"`     // Time period to track queries for prefetching, default 1h

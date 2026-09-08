@@ -1,0 +1,9 @@
+项目：query-log 的有界文件滚动与并发无损写入｜题目 ID：folbricht-routedns-6f8e5129-755c-4a21-ab6e-f80ba34715d7
+固定基线：74270fa3c1952d360c0bbf97e8fa63eac85f27df｜Trae 有效轮数：56｜Session：6a9f65f94fd6592ae56033ce
+验证摘要：go test ./... -run 'QueryLog|Rotation|Rotate|Rolling' 通过；go test -race ./... -run 'QueryLog|Rotation|Rotate|Rolling' 通过。完整套件仅有原有外部网络测试失败。
+Rubric ID：1｜状态：通过｜期望行为：达到边界后确定命名归档并创建活动文件，格式合法｜实际观察：rotatingFileWriter 在单条 Write 前串行滚动，text/JSON 记录完整｜直接证据：TestRotatingFileWriterRotation；TestQueryLogResolverRotatesEndToEnd
+Rubric ID：2｜状态：通过｜期望行为：并发滚动时记录不丢失、重复或拼接｜实际观察：20 个并发 writer 每条 JSON 记录只出现一次，race 通过｜直接证据：TestRotatingFileWriterConcurrentSlog
+Rubric ID：3｜状态：通过｜期望行为：rename/open/write 失败保留旧文件并可重试恢复｜实际观察：注入 rename/open 失败时继续写旧 fd，后续记录恢复滚动并清除错误｜直接证据：TestRotatingFileWriterRenameFailureKeepsCurrentFile；TestRotatingFileWriterOpenFailureKeepsCurrentFile
+Rubric ID：4｜状态：通过｜期望行为：关闭冲刷并关闭拥有资源，重复关闭不泄漏｜实际观察：QueryLogResolver.Close 幂等关闭 rotating writer，stdout 不被关闭｜直接证据：TestQueryLogResolverClose; query-log.go Close
+Rubric ID：5｜状态：通过｜期望行为：无上限、stdout、text/JSON 和下游转发兼容｜实际观察：MaxSize=0 仍 append，端到端两种格式均转发全部查询｜直接证据：TestQueryLogResolverRotatesEndToEnd；NewQueryLogResolver
+Rubric ID：6｜状态：通过｜期望行为：非法格式/参数稳定报错且字段命名兼容｜实际观察：非法 output-format 在构造阶段返回错误，ClientInfo/ECS/question 字段测试保持通过｜直接证据：TestQueryLogResolverInvalidFormat；cmd/routedns/config_test.go
