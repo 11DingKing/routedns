@@ -1,0 +1,9 @@
+项目：TLS 服务端证书的无损热轮换｜题目 ID：folbricht-routedns-ebd2f9ec-dc4f-4d0a-a1e4-fb1b5e691010
+固定基线：74270fa3c1952d360c0bbf97e8fa63eac85f27df｜Trae 有效轮数：111｜Session：6a9f66044fd6592ae5603422
+验证摘要：go test ./... -run 'Cert|Rotate' 通过；go test -race ./... -run 'Cert|Rotate' 通过。完整套件仅有原有外部网络测试 TestDoTClientSimple/TestNetResolver 失败。
+Rubric ID：1｜状态：通过｜期望行为：证书和私钥完整校验后才发布新代，坏候选保留旧代｜实际观察：匹配证书发布代际，缺失、乱码、不匹配均保留旧证书｜直接证据：TestCertRotatorReloadPublishesNewGeneration、TestCertRotatorReloadFailuresKeepGeneration
+Rubric ID：2｜状态：通过｜期望行为：新握手用新证书，活动连接不受影响｜实际观察：TLS 与 DTLS hook 从原子当前代取证书，握手测试观察到新代｜直接证据：TestCertRotatorTLSHandshakesUseGeneration；certrotate.go GetCertificate/GetDTLSCertificate
+Rubric ID：3｜状态：通过｜期望行为：不可读或校验失败可观察且恢复后切换｜实际观察：错误分类计数和日志保留旧代，文件恢复后下一次 reload 发布｜直接证据：TestCertRotatorReloadFailuresKeepGeneration；certRotateErrorClass/reload
+Rubric ID：4｜状态：通过｜期望行为：监听器重建和停止不泄漏 watcher 或重复关闭｜实际观察：Start/Close 幂等，停止等待 watcher，netns 路径复用同一 rotator｜直接证据：TestCertRotatorStartClose；main.go rotators 生命周期
+Rubric ID：5｜状态：通过｜期望行为：关闭轮换及非 TLS、客户端认证语义保持兼容｜实际观察：配置检查覆盖 plaintext/no-tls/PSK，TLS 配置保留 CA 和 client-auth｜直接证据：TestCheckCertRotateRejected；EnableCertRotation 保留 TLS 配置
+Rubric ID：6｜状态：通过｜期望行为：配置错误稳定返回且地址、协议、网络语义不变｜实际观察：非法组合在启动前返回确定错误，listener 构造参数未改动｜直接证据：TestCheckCertRotate、cmd/routedns/main.go 配置分支

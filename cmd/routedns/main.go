@@ -356,7 +356,10 @@ func run(opt options, args []string) error {
 	}
 
 	// Build the Listeners last as they can point to routers, groups or resolvers directly.
-	var listeners []pendingListener
+	var (
+		listeners []pendingListener
+		rotators  []*rdns.CertRotator
+	)
 	for id, l := range config.Listeners {
 		resolver, ok := resolvers[l.Resolver]
 		// All Listeners should route queries (except the admin service).
@@ -391,6 +394,9 @@ func run(opt options, args []string) error {
 		var build func() (rdns.Listener, error)
 		switch l.Protocol {
 		case "tcp", "udp":
+			if l.CertRotate {
+				return fmt.Errorf("listener '%s': cert-rotate is only supported on TLS listeners (dot, doh, doq, dtls, odoh, admin)", id)
+			}
 			network := networkForIPVersion(l.Protocol, l.IPVersion)
 			l.Address = rdns.AddressWithDefault(l.Address, rdns.PlainDNSPort)
 			build = func() (rdns.Listener, error) {
@@ -400,6 +406,14 @@ func run(opt options, args []string) error {
 			tlsConfig, err := rdns.TLSServerConfig(l.CA, l.ServerCrt, l.ServerKey, l.MutualTLS)
 			if err != nil {
 				return err
+			}
+			if l.CertRotate {
+				rotator, err := newListenerCertRotator(id, l)
+				if err != nil {
+					return err
+				}
+				rdns.EnableCertRotation(tlsConfig, rotator)
+				rotators = append(rotators, rotator)
 			}
 			adminOpt := rdns.AdminListenerOptions{
 				TLSConfig:     tlsConfig,
@@ -416,6 +430,14 @@ func run(opt options, args []string) error {
 			if err != nil {
 				return err
 			}
+			if l.CertRotate {
+				rotator, err := newListenerCertRotator(id, l)
+				if err != nil {
+					return err
+				}
+				rdns.EnableCertRotation(tlsConfig, rotator)
+				rotators = append(rotators, rotator)
+			}
 			build = func() (rdns.Listener, error) {
 				return rdns.NewDoTListener(id, l.Address, network, rdns.DoTListenerOptions{TLSConfig: tlsConfig, ListenOptions: opt}, resolver), nil
 			}
@@ -425,9 +447,20 @@ func run(opt options, args []string) error {
 			if err != nil {
 				return fmt.Errorf("listener '%s': %w", id, err)
 			}
+			if l.CertRotate && psk != nil {
+				return fmt.Errorf("listener '%s': cert-rotate cannot be combined with a DTLS psk, they are alternatives", id)
+			}
 			dtlsConfig, err := rdns.DTLSServerConfig(l.CA, l.ServerCrt, l.ServerKey, l.MutualTLS, psk)
 			if err != nil {
 				return fmt.Errorf("listener '%s': %w", id, err)
+			}
+			if l.CertRotate {
+				rotator, err := newListenerCertRotator(id, l)
+				if err != nil {
+					return err
+				}
+				rdns.EnableDTLSCertRotation(dtlsConfig, rotator)
+				rotators = append(rotators, rotator)
 			}
 			build = func() (rdns.Listener, error) {
 				return rdns.NewDTLSListener(id, l.Address, rdns.DTLSListenerOptions{DTLSConfig: dtlsConfig, ListenOptions: opt}, resolver), nil
@@ -438,6 +471,9 @@ func run(opt options, args []string) error {
 			} else {
 				l.Address = rdns.AddressWithDefault(l.Address, rdns.DoHPort)
 			}
+			if l.CertRotate && l.NoTLS {
+				return fmt.Errorf("listener '%s': cert-rotate requires a server certificate and cannot be combined with no-tls", id)
+			}
 			var tlsConfig *tls.Config
 			if l.NoTLS {
 				if l.Transport == "quic" {
@@ -447,6 +483,14 @@ func run(opt options, args []string) error {
 				tlsConfig, err = rdns.TLSServerConfig(l.CA, l.ServerCrt, l.ServerKey, l.MutualTLS)
 				if err != nil {
 					return err
+				}
+				if l.CertRotate {
+					rotator, err := newListenerCertRotator(id, l)
+					if err != nil {
+						return err
+					}
+					rdns.EnableCertRotation(tlsConfig, rotator)
+					rotators = append(rotators, rotator)
 				}
 			}
 			var httpProxyNet *net.IPNet
@@ -473,6 +517,14 @@ func run(opt options, args []string) error {
 			if err != nil {
 				return err
 			}
+			if l.CertRotate {
+				rotator, err := newListenerCertRotator(id, l)
+				if err != nil {
+					return err
+				}
+				rdns.EnableCertRotation(tlsConfig, rotator)
+				rotators = append(rotators, rotator)
+			}
 			build = func() (rdns.Listener, error) {
 				return rdns.NewQUICListener(id, l.Address, rdns.DoQListenerOptions{TLSConfig: tlsConfig, ListenOptions: opt}, resolver), nil
 			}
@@ -481,6 +533,14 @@ func run(opt options, args []string) error {
 			tlsConfig, err := rdns.TLSServerConfig(l.CA, l.ServerCrt, l.ServerKey, l.MutualTLS)
 			if err != nil {
 				return err
+			}
+			if l.CertRotate {
+				rotator, err := newListenerCertRotator(id, l)
+				if err != nil {
+					return err
+				}
+				rdns.EnableCertRotation(tlsConfig, rotator)
+				rotators = append(rotators, rotator)
 			}
 			odohOpt := rdns.ODoHListenerOptions{
 				TLSConfig:     tlsConfig,
@@ -531,6 +591,20 @@ func run(opt options, args []string) error {
 			"groups", len(config.Groups),
 			"routers", len(config.Routers))
 		return nil
+	}
+
+	// Start certificate rotators. These live for the whole process rather
+	// than being tied to listener Start/Stop: netns-supervised listeners are
+	// rebuilt on every namespace cycle, so a rotator owned by a listener
+	// instance would leak a watcher goroutine each time the namespace flaps,
+	// and closing it on listener Stop would pull the certificate source out
+	// from under the shared TLS config. Shutdown closes them once via onClose;
+	// Close is idempotent.
+	for _, rotator := range rotators {
+		rotator.Start()
+		onClose = append(onClose, func(r *rdns.CertRotator) func() {
+			return func() { _ = r.Close() }
+		}(rotator))
 	}
 
 	// Start the listeners. Listeners bound to a netns are run through a
@@ -1394,6 +1468,17 @@ func stopNetNSListener(id string, ln rdns.Listener, startErr <-chan error) {
 			}
 		}
 	}
+}
+
+// newListenerCertRotator builds a certificate rotator for a listener with
+// cert-rotate enabled. The initial pair is loaded eagerly, so a missing or
+// invalid certificate fails configuration here exactly as a static load does.
+func newListenerCertRotator(id string, l listener) (*rdns.CertRotator, error) {
+	rotator, err := rdns.NewCertRotator(id, l.ServerCrt, l.ServerKey, l.CertRotateInterval)
+	if err != nil {
+		return nil, fmt.Errorf("listener '%s': %w", id, err)
+	}
+	return rotator, nil
 }
 
 // buildNetNS constructs the namespace target for a listener or resolver from the

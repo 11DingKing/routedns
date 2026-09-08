@@ -29,8 +29,10 @@ type listener struct {
 	CA            string
 	ServerKey     string   `toml:"server-key"`
 	ServerCrt     string   `toml:"server-crt"`
-	MutualTLS     bool     `toml:"mutual-tls"`
-	PSK           string   `toml:"psk"`          // DTLS pre-shared key, hex-encoded. Alternative to a certificate.
+	MutualTLS         bool          `toml:"mutual-tls"`
+	CertRotate        bool          `toml:"cert-rotate"`           // Re-read server-crt/server-key periodically and rotate without a restart
+	CertRotateInterval time.Duration `toml:"cert-rotate-interval"` // Period between certificate file checks, default 1m
+	PSK               string        `toml:"psk"`                   // DTLS pre-shared key, hex-encoded. Alternative to a certificate.
 	PSKIdentity   string   `toml:"psk-identity"` // Identity hint offered with the PSK. Optional for listeners.
 	NoTLS         bool     `toml:"no-tls"`       // Disable TLS in DoH servers
 	AllowedNet    []string `toml:"allowed-net"`

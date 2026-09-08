@@ -384,6 +384,99 @@ resolver = "upstream"
 	}
 }
 
+// cert-rotate is accepted on every TLS listener protocol with a valid pair,
+// and the interval parses as a duration.
+func TestCheckCertRotate(t *testing.T) {
+	for _, protocol := range []string{"dot", "doh", "doq", "dtls", "odoh", "admin"} {
+		t.Run(protocol, func(t *testing.T) {
+			err := check(t, `
+[resolvers.upstream]
+address = "8.8.8.8:53"
+protocol = "udp"
+
+[listeners.local]
+address = "127.0.0.1:0"
+protocol = "`+protocol+`"
+resolver = "upstream"
+server-crt = "../../testdata/server.crt"
+server-key = "../../testdata/server.key"
+cert-rotate = true
+cert-rotate-interval = "30s"
+`)
+			require.NoError(t, err)
+		})
+	}
+}
+
+// cert-rotate has to fail configuration where no certificate can be rotated:
+// plaintext listeners, missing files, no-tls DoH, and DTLS PSK.
+func TestCheckCertRotateRejected(t *testing.T) {
+	t.Run("plaintext listener", func(t *testing.T) {
+		err := check(t, `
+[resolvers.upstream]
+address = "8.8.8.8:53"
+protocol = "udp"
+
+[listeners.local]
+address = "127.0.0.1:5399"
+protocol = "udp"
+resolver = "upstream"
+cert-rotate = true
+`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cert-rotate is only supported on TLS listeners")
+	})
+	t.Run("missing certificate files", func(t *testing.T) {
+		err := check(t, `
+[resolvers.upstream]
+address = "8.8.8.8:53"
+protocol = "udp"
+
+[listeners.local]
+address = "127.0.0.1:8853"
+protocol = "dot"
+resolver = "upstream"
+server-crt = "../../testdata/does-not-exist.crt"
+server-key = "../../testdata/does-not-exist.key"
+cert-rotate = true
+`)
+		require.Error(t, err)
+	})
+	t.Run("doh with no-tls", func(t *testing.T) {
+		err := check(t, `
+[resolvers.upstream]
+address = "8.8.8.8:53"
+protocol = "udp"
+
+[listeners.local]
+address = "127.0.0.1:8443"
+protocol = "doh"
+resolver = "upstream"
+no-tls = true
+cert-rotate = true
+`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot be combined with no-tls")
+	})
+	t.Run("dtls with psk", func(t *testing.T) {
+		err := check(t, `
+[resolvers.upstream]
+address = "8.8.8.8:53"
+protocol = "udp"
+
+[listeners.local]
+address = "127.0.0.1:8453"
+protocol = "dtls"
+resolver = "upstream"
+psk = "0102030405060708090a0b0c0d0e0f10"
+psk-identity = "server"
+cert-rotate = true
+`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot be combined with a DTLS psk")
+	})
+}
+
 // A listener that asks for both a key and client certificates cannot work.
 func TestCheckPSKWithMutualTLS(t *testing.T) {
 	err := check(t, `

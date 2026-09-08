@@ -26,6 +26,10 @@ Secure listeners, such as DNS-over-TLS, DNS-over-HTTPS, DNS-over-DTLS, DNS-over-
 - `server-key` - Server key file. Required.
 - `ca` - CA to validate client certificates. Optional, but required when `mutual-tls` is enabled.
 - `mutual-tls` - Requires clients to send valid (as per `ca` option) certificates before establishing a connection. Optional. When enabled, `ca` must be set; the listener will refuse to start otherwise (to avoid silently trusting the operating system's CA store for client authentication).
+- `cert-rotate` - Periodically re-read `server-crt` and `server-key` and switch new handshakes to the new certificate without a restart. Optional, defaults to `false`; when disabled the certificate is loaded once at startup exactly as without this option. A pair is only published when both files can be read and validate as a matching certificate/key pair; a missing, unreadable, malformed or mismatched pair is logged and counted in the metrics while the last valid certificate keeps being served. New TLS/DTLS handshakes use the newest certificate; connections established before a rotation keep theirs. Not supported on plaintext `udp`/`tcp` listeners, on `doh` listeners with `no-tls`, or on `dtls` listeners using a PSK.
+- `cert-rotate-interval` - How often the certificate files are checked when `cert-rotate` is enabled. A duration such as `30s` or `5m`. Optional, defaults to `1m` (one minute).
+
+Rotation state is observable through expvar under `routedns.certrotate.<listener-id>`: `generation` (number of certificates published, starts at 1) and `error` (failed reloads by class: `missing`, `permission`, `invalid`).
 
 The DNS-over-HTTPS listener also accepts the client IP address from trusted reverse proxies in a particular subnet. X-Forwarded-For headers are only used if they are provided from this subnet.
 
