@@ -19,12 +19,31 @@ Options:
 - `lua-script-source` - Path to an external `.lua` file. Alternative to `lua-script`.
 - `lua-concurrency` - Number of concurrent Lua VM instances (pool size). Default `4`.
 - `lua-no-sandbox` - Disable the sandbox to allow `io`, `os`, `debug`, and dynamic code loading. Default `false`.
+- `lua-script-watch` - Watch the external script file (`lua-script-source`) and hot-reload it when it changes. Requires `lua-script-source`; inline scripts are never watched. Default `false`, in which case the script is loaded once at startup and changing it requires a restart.
+- `lua-script-watch-poll` - How often the script file is checked for changes, e.g. `"500ms"` or `"2s"`. Default `1s`.
 
 ### Sandbox
 
 By default, scripts run in a sandbox that provides access to safe libraries: `base` (with dangerous functions removed), `string`, `math`, `table`, and `coroutine`. The following functions are blocked in sandbox mode: `dofile`, `loadfile`, `load`, `loadstring`, `module`, `require`. The `io`, `os`, `debug`, and `package` libraries are not loaded.
 
 Set `lua-no-sandbox = true` to disable the sandbox and allow full access to all Lua libraries. Only use this for trusted scripts.
+
+### Hot-reloading external scripts
+
+Set `lua-script-watch = true` with `lua-script-source` to have the group pick up script changes without a restart:
+
+```toml
+[groups.lua-custom]
+type = "lua"
+resolvers = ["cloudflare-dot"]
+lua-script-source = "/etc/routedns/custom.lua"
+lua-script-watch = true
+lua-script-watch-poll = "1s"
+```
+
+The file is polled for changes. When it changes, a complete new generation of Lua VMs is built: the file is read in full, compiled, and each VM runs through the same initialization as at startup (sandbox, constants, DNS types, `ClientInfo`, and upstream resolver injection). The new generation is published atomically only after the entire VM pool is ready. Requests that borrowed a VM from the previous generation finish on it and then release it; every new request is served by the current generation. Superseded VMs are closed once the request using them completes, so no request ever runs against a half-loaded or closed state.
+
+If the file is deleted or unreadable, fails to compile, lacks a `Resolve` function, or fails to initialize, the previous complete generation keeps serving traffic. The failure is logged and recorded (observable as the group's reload error); the watcher keeps retrying and switches automatically once the file is valid again. Rewriting the file with the same content as the loaded generation is a no-op. Watching is disabled by default and does not apply to inline `lua-script` configurations, which keep their load-once behavior.
 
 ### Lua API
 

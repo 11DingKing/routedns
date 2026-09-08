@@ -217,10 +217,12 @@ type group struct {
 	PrefetchMaxItems  int           `toml:"prefetch-max-items"`  // Maximum number of items to track prefetch, default (0) unlimited
 
 	// Lua scripting options
-	LuaScript       string `toml:"lua-script"`        // Inline Lua script
-	LuaScriptSource string `toml:"lua-script-source"` // Path to external Lua script file
-	LuaConcurrency  uint   `toml:"lua-concurrency"`   // Number of concurrent Lua instances, default 4
-	LuaNoSandbox    bool   `toml:"lua-no-sandbox"`    // Disable sandbox for trusted scripts
+	LuaScript            string        `toml:"lua-script"`              // Inline Lua script
+	LuaScriptSource      string        `toml:"lua-script-source"`       // Path to external Lua script file
+	LuaConcurrency       uint          `toml:"lua-concurrency"`         // Number of concurrent Lua instances, default 4
+	LuaNoSandbox         bool          `toml:"lua-no-sandbox"`          // Disable sandbox for trusted scripts
+	LuaScriptWatch       bool          `toml:"lua-script-watch"`        // Watch the external script file and hot-reload it on change
+	LuaScriptWatchPoll   time.Duration `toml:"lua-script-watch-poll"`   // Polling interval for script file changes, default 1s
 
 	// DNSSEC validator options
 	DNSSECTrustAnchors   []trustAnchor `toml:"dnssec-trust-anchors"`

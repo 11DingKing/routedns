@@ -1048,22 +1048,19 @@ func instantiateGroup(id string, g group, resolvers map[string]rdns.Resolver) er
 			return fmt.Errorf("failed to initialize 'query-log': %w", err)
 		}
 	case "lua":
-		// Determine script content: inline or from file
-		script := g.LuaScript
-		if g.LuaScriptSource != "" {
-			b, err := os.ReadFile(g.LuaScriptSource)
-			if err != nil {
-				return fmt.Errorf("failed to read lua script '%s' for group '%s': %w", g.LuaScriptSource, id, err)
-			}
-			script = string(b)
-		}
-		if script == "" {
+		if g.LuaScript == "" && g.LuaScriptSource == "" {
 			return fmt.Errorf("group '%s' of type 'lua' requires 'lua-script' or 'lua-script-source'", id)
 		}
+		if g.LuaScriptWatch && g.LuaScriptSource == "" {
+			return fmt.Errorf("group '%s': 'lua-script-watch' requires 'lua-script-source'", id)
+		}
 		opt := rdns.LuaOptions{
-			Script:      script,
-			Concurrency: g.LuaConcurrency,
-			NoSandbox:   g.LuaNoSandbox,
+			Script:        g.LuaScript,
+			ScriptSource:  g.LuaScriptSource,
+			Concurrency:   g.LuaConcurrency,
+			NoSandbox:     g.LuaNoSandbox,
+			Watch:         g.LuaScriptWatch,
+			WatchInterval: g.LuaScriptWatchPoll,
 		}
 		resolvers[id], err = rdns.NewLua(id, opt, gr...)
 		if err != nil {

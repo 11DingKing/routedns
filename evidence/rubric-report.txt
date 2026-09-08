@@ -1,0 +1,9 @@
+项目：Lua 外部脚本的代际热加载与安全回退｜题目 ID：folbricht-routedns-5c155aba-8ff5-4b64-b3cf-3a7fb2605a1e
+固定基线：74270fa3c1952d360c0bbf97e8fa63eac85f27df｜Trae 有效轮数：51｜Session：6a9f65fe4fd6592ae5603413
+验证摘要：go test ./... -run 'Lua|Reload|Generation' 通过；go test -race ./... -run 'Lua|Reload|Generation' 通过。完整套件仅有原有外部网络测试失败。
+Rubric ID：1｜状态：通过｜期望行为：完整读取、编译、注入并建池后原子发布｜实际观察：buildGen 完成 sandbox、类型、resolver 注入后才交换 atomic generation｜直接证据：lua-reload_test.go TestLuaReloadPublishesGeneration；lua.go buildGen/Reload
+Rubric ID：2｜状态：通过｜期望行为：旧请求完成，新请求取新代且无跨代全局｜实际观察：借用 VM 绑定 generation，旧代 retire 后归还关闭，新请求循环取当前代｜直接证据：TestLuaReloadDrainsOldGeneration；lua.go borrow/release
+Rubric ID：3｜状态：通过｜期望行为：删除、不可读、语法或初始化失败保留旧代并可恢复｜实际观察：ReloadError 与日志稳定记录失败，修复文件后切换｜直接证据：TestLuaReloadFailuresKeepPreviousGeneration；Reload/reportReloadResult
+Rubric ID：4｜状态：通过｜期望行为：快速变更、并发和停止不泄漏 VM 或 watcher｜实际观察：race 测试通过，Close 等待 watchDone 和 generation WaitGroup，重复 Close 安全｜直接证据：TestLuaReloadConcurrentClose；lua.go Close/watch/retire
+Rubric ID：5｜状态：通过｜期望行为：关闭监视、内联脚本和未变更行为兼容｜实际观察：Watch 默认关闭，内联脚本不启动 watcher，既有参数注入路径保留｜直接证据：TestLuaInlineCompatibility；NewLua Watch 分支
+Rubric ID：6｜状态：通过｜期望行为：Message、EDNS0、BuildVersion、ClientInfo、Resolver API 代内一致｜实际观察：新旧 generation 均由同一 build 注入逻辑建立，既有 Lua 测试通过｜直接证据：go test ./... -run 'Lua|Reload|Generation'；buildGen 注入代码
